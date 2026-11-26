@@ -15,4 +15,70 @@ def build_graph(results: list[ExtractionResult]) -> nx.DiGraph:
     отбрасываются обе. Число таких конфликтов записывается в `graph.graph["conflicts"]`.
     """
     # TODO: узлы, рёбра с весами, проверка схемы, разбор встречных замен
-    raise NotImplementedError("Реализуйте build_graph")
+    graph = nx.DiGraph()
+    conflicts = 0
+
+    # Узлы
+    for result in results:
+        for entity in result.entities:
+            if not graph.has_node(entity.node_id):
+                graph.add_node(
+                    entity.node_id,
+                    type=entity.type,
+                    name=entity.name,
+                    sources=[],
+                )
+            if result.chunk_id not in graph.nodes[entity.node_id]["sources"]:
+                graph.nodes[entity.node_id]["sources"].append(result.chunk_id)
+
+    # Рёбра
+    for result in results:
+        for relation in result.relations:
+            if not relation.matches_schema():
+                continue
+
+            u = relation.subject.node_id
+            v = relation.object.node_id
+
+            if not graph.has_node(u):
+                graph.add_node(u, type=relation.subject.type,
+                            name=relation.subject.name, sources=[])
+
+            if not graph.has_node(v):
+                graph.add_node(v, type=relation.object.type,
+                            name=relation.object.name, sources=[])
+
+            if graph.has_edge(u, v) and graph[u][v]["type"] == relation.type:
+                if result.chunk_id not in graph[u][v]["sources"]:
+                    graph[u][v]["sources"].append(result.chunk_id)
+                    graph[u][v]["weight"] += 1
+            else:
+                graph.add_edge(u, v, type=relation.type,
+                            weight=1, sources=[result.chunk_id])
+
+    # Встречные REPLACED_BY
+    for u, v in list(graph.edges()):
+        if not graph.has_edge(u, v):
+            continue
+
+        if graph[u][v]["type"] != "REPLACED_BY":
+            continue
+
+        if not graph.has_edge(v, u) or graph[v][u]["type"] != "REPLACED_BY":
+            continue
+
+        weight_uv = graph[u][v]["weight"]
+        weight_vu = graph[v][u]["weight"]
+
+        if weight_uv > weight_vu:
+            graph.remove_edge(v, u)
+        elif weight_vu > weight_uv:
+            graph.remove_edge(u, v)
+        else:
+            graph.remove_edge(u, v)
+            graph.remove_edge(v, u)
+
+        conflicts += 1
+
+    graph.graph["conflicts"] = conflicts
+    return graph
