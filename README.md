@@ -115,7 +115,7 @@ flowchart TB
 
 ```bash
 cp .env.example .env
-make up                    # собрать и запустить сервисы
+make up                    # собрать и запустить сервисы #
 make test                  # тесты платформы проходят, 50 контрактных пока падают
 make eval MODE=baseline    # плоский RAG на открытых вопросах
 ```

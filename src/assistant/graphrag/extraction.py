@@ -1,7 +1,7 @@
 """Извлечение сущностей и связей из чанка. Требование FR-1."""
 
 from assistant.infra.llm import LLMClient
-from assistant.infra.schemas import Chunk, ExtractionResult, EXTRACTION_SCHEMA, Entity, Relation, RELATION_SIGNATURES
+from assistant.infra.schemas import Chunk, ExtractionResult, EXTRACTION_SCHEMA, Entity, Relation
 from assistant.infra.grounding import find_codes, canonical_name, load_vocabulary, find_names
 import json
 
@@ -19,8 +19,7 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
     # TODO: запрос к модели, разбор JSON, проверки по тексту чанка и словарю
     result = ExtractionResult(chunk_id=chunk.chunk_id, doc_id=chunk.doc_id)
 
-    vocabulary_path = 'data/vocabulary.json'
-    vocabulary = load_vocabulary(vocabulary_path)
+    vocabulary = load_vocabulary('data/vocabulary.json')
 
     codes = set(find_codes(chunk.text))
     names = set(find_names(chunk.text, vocabulary))
@@ -56,6 +55,7 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
         return result
 
     entities = {}
+    dropped_entities = set()
     entity_candidates = list(data["entities"])
 
     for item in data["relations"]:
@@ -74,12 +74,14 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
 
         if name is None or (item["type"] in code_types and name not in codes) or (
             item["type"] not in code_types and (item["type"], name) not in names):
-            result.dropped += 1
+            dropped_name = name if name is not None else item["name"].strip().casefold()
+            dropped_entities.add((item["type"], dropped_name))
             continue
 
         entity = Entity(item["type"], name)
         entities[entity.node_id] = entity
 
+    result.dropped += len(dropped_entities)
     result.entities = list(entities.values())
 
     for item in data["relations"]:
@@ -89,17 +91,12 @@ def extract_chunk(chunk: Chunk, llm: LLMClient) -> ExtractionResult:
         subject = entities.get(f"{item['subject_type']}:{subject_name}")
         object_ = entities.get(f"{item['object_type']}:{object_name}")
 
-        if RELATION_SIGNATURES.get(item["type"]) != (
-            item["subject_type"], item["object_type"]
-        ):
-            result.dropped += 1
-            continue
+        if subject and object_:
+            relation = Relation(subject, item["type"], object_)
+            if relation.matches_schema():
+                result.relations.append(relation)
+                continue
 
-        relation = Relation(subject, item["type"], object_) if subject and object_ else None
-
-        if relation and relation.matches_schema():
-            result.relations.append(relation)
-        else:
-            result.dropped += 1
+        result.dropped += 1
 
     return result
