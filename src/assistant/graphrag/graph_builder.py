@@ -2,7 +2,7 @@
 
 import networkx as nx
 
-from assistant.infra.schemas import ExtractionResult
+from assistant.infra.schemas import Entity, ExtractionResult
 
 
 def build_graph(results: list[ExtractionResult]) -> nx.DiGraph:
@@ -18,18 +18,18 @@ def build_graph(results: list[ExtractionResult]) -> nx.DiGraph:
     graph = nx.DiGraph()
     conflicts = 0
 
+    def add_entity(entity: Entity, chunk_id: str) -> None:
+        node_id = entity.node_id
+        if not graph.has_node(node_id):
+            graph.add_node(node_id, type=entity.type, name=entity.name, sources=[])
+        sources = graph.nodes[node_id]["sources"]
+        if chunk_id not in sources:
+            sources.append(chunk_id)
+
     # Узлы
     for result in results:
         for entity in result.entities:
-            if not graph.has_node(entity.node_id):
-                graph.add_node(
-                    entity.node_id,
-                    type=entity.type,
-                    name=entity.name,
-                    sources=[],
-                )
-            if result.chunk_id not in graph.nodes[entity.node_id]["sources"]:
-                graph.nodes[entity.node_id]["sources"].append(result.chunk_id)
+            add_entity(entity, result.chunk_id)
 
     # Рёбра
     for result in results:
@@ -37,6 +37,8 @@ def build_graph(results: list[ExtractionResult]) -> nx.DiGraph:
             if not relation.matches_schema():
                 continue
 
+            add_entity(relation.subject, result.chunk_id)
+            add_entity(relation.object, result.chunk_id)
             u = relation.subject.node_id
             v = relation.object.node_id
 
